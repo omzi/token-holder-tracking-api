@@ -94,7 +94,7 @@ Retrieve paginated list of token holders
 - Query Parameters:
   - `page` (default: 1)
   - `limit` (default: 10, max: 100)
-  - `sortBy` (options: balance, address, rank)
+  - `sortBy` (options: balance, address, percentage)
   - `order` (options: asc, desc)
 
 ### POST /sync
