@@ -28,6 +28,16 @@ interface TokenTransaction {
 }
 
 /**
+ * Represents the balance of an address
+ */
+interface AddressBalance {
+  /** Address of the account */
+  account: string;
+  /** Balance of the account */
+  balance: string;
+}
+
+/**
  * API response structure from Fraxscan
  */
 interface Response<T> {
@@ -99,49 +109,87 @@ export class SyncService {
     }
   }
 
+  private async processAddresses(
+    uniqueAddresses: string[],
+  ): Promise<Map<string, string>> {
+    const balances = new Map<string, string>();
+    const BATCH_SIZE = 20;
+    const CONCURRENT_BATCHES = 5;
+
+    // Split all addresses into batches of 20
+    const batches: string[][] = [];
+    for (let i = 0; i < uniqueAddresses.length; i += BATCH_SIZE) {
+      batches.push(uniqueAddresses.slice(i, i + BATCH_SIZE));
+    }
+
+    // Process batches in groups of 5 concurrent requests
+    for (let i = 0; i < batches.length; i += CONCURRENT_BATCHES) {
+      const currentBatches = batches.slice(i, i + CONCURRENT_BATCHES);
+      const promises = currentBatches.map(async (addressBatch) => {
+        const addressString = addressBatch.join(',');
+
+        try {
+          const response = await axios.get<Response<AddressBalance>>(
+            this.FRAXSCAN_API_URL,
+            {
+              params: {
+                module: 'account',
+                action: 'balancemulti',
+                address: addressString,
+                tag: 'latest',
+                apikey: this.configService.get('FRAXSCAN_API_KEY'),
+              },
+            },
+          );
+
+          if (response.data.result) {
+            response.data.result.forEach(({ account, balance }) => {
+              if (new BigNumber(balance).isGreaterThan(0)) {
+                balances.set(account.toLowerCase(), balance);
+              }
+            });
+          }
+        } catch (error) {
+          this.logger.error(`Error fetching balances for batch: ${error}`);
+          throw error;
+        }
+      });
+
+      await Promise.all(promises);
+      // Wait 1 second before processing next batch of 5
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    return balances;
+  }
+
   private async processTransactions(
     transactions: TokenTransaction[],
-    isLastBatch: boolean,
   ): Promise<void> {
     if (transactions.length === 0) return;
 
-    const balances = new Map<string, BigNumber>();
+    // Extract unique "to" addresses, excluding zero address
+    const uniqueAddresses = [
+      ...new Set(
+        transactions
+          .map((tx) => tx.to)
+          .filter((address) => address !== this.ZERO_ADDRESS),
+      ),
+    ];
 
-    // Get existing balances if this is not the first batch
-    const existingHolders = await this.holdersRepository.find();
-    existingHolders.forEach((holder) => {
-      balances.set(holder.address, new BigNumber(holder.balance));
-    });
+    // Get all balances with concurrent processing
+    const balances = await this.processAddresses(uniqueAddresses);
 
-    for (const tx of transactions) {
-      const { from, to, value } = tx;
-      const valueNumber = new BigNumber(value);
-
-      if (from !== this.ZERO_ADDRESS) {
-        const currentFromBalance = balances.get(from) || new BigNumber(0);
-        balances.set(from, currentFromBalance.minus(valueNumber));
-      }
-
-      if (to !== this.ZERO_ADDRESS) {
-        const currentToBalance = balances.get(to) || new BigNumber(0);
-        balances.set(to, currentToBalance.plus(valueNumber));
-      }
-    }
-
-    // Convert balances to holders array, filtering out zero or negative balances
-    const holders = Array.from(balances.entries())
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      .filter(([_, balance]) => balance.isGreaterThan(0))
-      .map(([address, balance]) => ({
+    // Convert balances to holders array
+    const holders = Array.from(balances.entries()).map(
+      ([address, balance]) => ({
         address,
-        balance: balance.toString(),
-      }));
+        balance,
+      }),
+    );
 
     // Update database in a transaction
     await this.holdersRepository.manager.transaction(async (manager) => {
-      if (isLastBatch) {
-        await manager.clear(Holder);
-      }
       await manager.save(Holder, holders);
 
       // Update the last processed block
@@ -199,8 +247,7 @@ export class SyncService {
           endBlock,
         );
 
-        const isLastBatch = endBlock >= currentBlock;
-        await this.processTransactions(transactions, isLastBatch);
+        await this.processTransactions(transactions);
 
         processedBlock = endBlock + 1;
 
