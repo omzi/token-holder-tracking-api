@@ -54,7 +54,7 @@ export class SyncService {
     uniqueAddresses: string[],
   ): Promise<Map<string, string>> {
     const balances = new Map<string, string>();
-    const BATCH_SIZE = 10000;
+    const BATCH_SIZE = 100000;
     const CONCURRENT_BATCHES = 10;
 
     // Split addresses into batches
@@ -100,6 +100,8 @@ export class SyncService {
    * @throws Error if sync fails
    */
   async sync(): Promise<void> {
+    const startTime = Date.now();
+
     try {
       // Get the last processed block
       const blockState = await this.blockStateRepository.findOne({
@@ -112,7 +114,7 @@ export class SyncService {
       // Get all Transfer events
       const filter = this.tokenContract.filters.Transfer();
       const currentBlock = await this.provider.getBlockNumber();
-      const CHUNK_SIZE = 100000;
+      const CHUNK_SIZE = 1000000;
       let fromBlock = startBlock;
       const uniqueAddresses = new Set<string>();
 
@@ -160,15 +162,23 @@ export class SyncService {
 
       // Update database
       await this.holdersRepository.manager.transaction(async (manager) => {
-        await manager.save(Holder, holders);
+        if (holders.length > 0) {
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(Holder)
+            .values(holders)
+            .execute();
+        }
         await manager.save(BlockState, {
           id: 'latest',
           lastProcessedBlock: currentBlock.toString(),
         });
       });
 
+      const duration = (Date.now() - startTime) / 1000;
       this.logger.log(
-        `✅ Synchronization completed. Found ${holders.length} current holders`,
+        `✅ Sync completed in ${duration}s. Processed ${holders.length} holders`,
       );
     } catch (error) {
       this.logger.error('Error during sync :>>', error);
@@ -215,6 +225,8 @@ export class SyncService {
     this.logger.log('🔄 Starting balance check...');
     this.isBalanceSyncing = true;
 
+    const startTime = Date.now();
+
     try {
       const allAddresses = await this.holdersRepository.find();
       this.logger.log(
@@ -245,11 +257,19 @@ export class SyncService {
         // Update database with new holders in a transaction
         await this.holdersRepository.manager.transaction(async (manager) => {
           await manager.clear(Holder); // Clear existing holders
-          await manager.save(Holder, holders); // Save new holders
+          if (holders.length > 0) {
+            await manager
+              .createQueryBuilder()
+              .insert()
+              .into(Holder)
+              .values(holders)
+              .execute();
+          }
         });
 
+        const duration = (Date.now() - startTime) / 1000;
         this.logger.log(
-          `✅ Balance check completed. Updated ${holders.length} holders.`,
+          `✅ Balance check completed in ${duration}s. Updated ${holders.length} holders`,
         );
       } else {
         this.logger.log(`✨ No stale address found!`);
