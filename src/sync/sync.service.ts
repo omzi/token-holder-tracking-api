@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { Repository } from 'typeorm';
+import BigNumber from 'bignumber.js';
 import { Cron } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -26,6 +27,7 @@ export class SyncService {
   private readonly TOKEN_ADDRESS = '0xdcc0f2d8f90fde85b10ac1c8ab57dc0ae946a543';
   private readonly ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
   private isSyncing = false;
+  private isBalanceSyncing = false;
   private provider: ethers.JsonRpcProvider;
   private tokenContract: ethers.Contract;
 
@@ -67,8 +69,10 @@ export class SyncService {
       const promises = currentBatches.map(async (addressBatch) => {
         const balancePromises = addressBatch.map(async (address) => {
           try {
-            const balance = await this.tokenContract.balanceOf(address);
-            if (balance > 0) {
+            const balance = new BigNumber(
+              await this.tokenContract.balanceOf(address),
+            );
+            if (balance.gt(0)) {
               balances.set(address.toLowerCase(), balance.toString());
             }
           } catch (error) {
@@ -176,22 +180,84 @@ export class SyncService {
     return this.isSyncing;
   }
 
-  @Cron('*/10 * * * * *')
+  @Cron('*/10 * * * * *') // Runs every 10 seconds
   async handleSyncCron() {
+    if (this.isBalanceSyncing) {
+      this.logger.log('⏳ Balance check in progress, skipping sync...');
+      return;
+    }
+
     if (this.isSyncing) {
       this.logger.log('⏳ Sync already in progress, skipping...');
       return;
     }
 
     this.logger.log('🔄 Starting scheduled synchronization...');
+    this.isSyncing = true;
 
     try {
-      this.isSyncing = true;
       await this.sync();
     } catch (error) {
       this.logger.error(`❌ Error in sync cron job: ${error}`);
     } finally {
       this.isSyncing = false;
+    }
+  }
+
+  @Cron('*/10 * * * *') // Runs every 10 minutes
+  async handleBalanceCheck() {
+    // Wait for sync to complete if it's currently running
+    while (this.isSyncing) {
+      this.logger.log('⏳ Sync in progress, waiting for it to complete...');
+      await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait for 1 second before checking again
+    }
+
+    this.logger.log('🔄 Starting balance check...');
+    this.isBalanceSyncing = true;
+
+    try {
+      const allAddresses = await this.holdersRepository.find();
+      this.logger.log(
+        `🔗 Fetched ${allAddresses.length} addresses from the database.`,
+      );
+
+      const balances = new Map<string, string>();
+      const BATCH_SIZE = 100000;
+
+      // Process addresses in batches
+      for (let i = 0; i < allAddresses.length; i += BATCH_SIZE) {
+        const addressBatch = allAddresses
+          .slice(i, i + BATCH_SIZE)
+          .map((holder) => holder.address);
+        const batchBalances = await this.processAddresses(addressBatch);
+        batchBalances.forEach((balance, address) => {
+          balances.set(address, balance);
+        });
+      }
+
+      if (allAddresses.length !== balances.size) {
+        const holders = Array.from(balances.entries()).map(
+          ([address, balance]) => ({
+            address,
+            balance,
+          }),
+        );
+        // Update database with new holders in a transaction
+        await this.holdersRepository.manager.transaction(async (manager) => {
+          await manager.clear(Holder); // Clear existing holders
+          await manager.save(Holder, holders); // Save new holders
+        });
+
+        this.logger.log(
+          `✅ Balance check completed. Updated ${holders.length} holders.`,
+        );
+      } else {
+        this.logger.log(`✨ No stale address found!`);
+      }
+    } catch (error) {
+      this.logger.error('Error during balance check :>>', error);
+    } finally {
+      this.isBalanceSyncing = false;
     }
   }
 }
