@@ -35,12 +35,14 @@ A robust NestJS application that synchronizes with the FraxScan blockchain to tr
 The system is built around two core modules:
 
 ### 🔄 Sync Module
+
 - Blockchain event synchronization
 - Balance management
 - Progress tracking (CLI)
 - Automated updates
 
 ### 📊 Holders Module
+
 - Paginated data access
 - Percentage analytics
 - Sorting capabilities
@@ -51,7 +53,7 @@ The system is built around two core modules:
 - **Database**: PostgreSQL
 - **ORM**: TypeORM
 - **API**: FraxScan Blockchain API
-- **Libraries**: 
+- **Libraries**:
   - BigNumber.js (precision calculations)
   - Axios (API requests)
   - class-validator (input validation)
@@ -60,25 +62,29 @@ The system is built around two core modules:
 ## 🚀 Getting Started
 
 1. **Clone the repository**
+
 ```bash
 git clone https://github.com/omzi/token-holder-tracking-api.git
 cd token-holder-tracking-api
 ```
 
 2. **Install dependencies**
+
 ```bash
 npm install
 ```
 
 3. **Configure environment variables**
-Create a `.env` file in the root directory:
+Create a `.env` file in the root directory (or rename the `.env.example` file to `.env`):
+
 ```env
-DATABASE_URL=# Your PostgreSQL connection string
-FRAXSCAN_API_KEY=#Your FraxScan API key
-PORT=3000
+DATABASE_URL = # Your PostgreSQL connection string
+FRAXSCAN_RPC_URL = https://rpc.frax.com
+PORT = 3000
 ```
 
 4. **Start the application**
+
 ```bash
 # Development
 npm run start:dev
@@ -90,7 +96,9 @@ npm run start:prod
 ## 🔌 API Endpoints
 
 ### GET /holders
+
 Retrieve paginated list of token holders
+
 - Query Parameters:
   - `page` (default: 1)
   - `limit` (default: 10, max: 100)
@@ -98,6 +106,7 @@ Retrieve paginated list of token holders
   - `order` (options: asc, desc)
 
 ### POST /sync
+
 Manually trigger blockchain synchronization
 
 ## 📚 API Documentation
