@@ -17,7 +17,7 @@
 
 ## 📜 About
 
-A robust NestJS application that synchronizes with the FraxScan blockchain to track token holders and their balances in real-time. Features automatic synchronization, high-precision balance tracking, and holder analytics.
+A robust NestJS application that synchronizes with the Fraxtal blockchain to track token holders and their balances in real-time. Features automatic synchronization, high-precision balance tracking, and holder analytics.
 
 ## ⚡ Key Features
 
@@ -52,10 +52,10 @@ The system is built around two core modules:
 - **Framework**: NestJS
 - **Database**: PostgreSQL
 - **ORM**: TypeORM
-- **API**: FraxScan Blockchain API
+- **RPC**: Fraxtal RPC
 - **Libraries**:
   - BigNumber.js (precision calculations)
-  - Axios (API requests)
+  - Ethers (blockchain querying)
   - class-validator (input validation)
   - Swagger (API documentation)
 
