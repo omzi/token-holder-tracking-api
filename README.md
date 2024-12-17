@@ -79,7 +79,8 @@ Create a `.env` file in the root directory (or rename the `.env.example` file to
 
 ```env
 DATABASE_URL = # Your PostgreSQL connection string
-FRAXSCAN_RPC_URL = https://rpc.frax.com
+TOKEN_ADDRESS = # The token's contact address
+FRAXTAL_RPC_URL = https://rpc.frax.com
 PORT = 3000
 ```
 

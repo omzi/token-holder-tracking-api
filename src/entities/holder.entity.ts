@@ -1,6 +1,6 @@
 import { Entity, PrimaryColumn, Column } from 'typeorm';
 
-@Entity('holders')
+@Entity('Holders')
 export class Holder {
   @PrimaryColumn()
   address: string;

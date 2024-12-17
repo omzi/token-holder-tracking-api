@@ -24,7 +24,6 @@ const ERC20_ABI = [
 @Injectable()
 export class SyncService {
   private readonly logger = new Logger(SyncService.name);
-  private readonly TOKEN_ADDRESS = '0xdcc0f2d8f90fde85b10ac1c8ab57dc0ae946a543';
   private readonly ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
   private isSyncing = false;
   private isBalanceSyncing = false;
@@ -41,10 +40,10 @@ export class SyncService {
   ) {
     // Initialize ethers provider and contract
     this.provider = new ethers.JsonRpcProvider(
-      this.configService.get('FRAXSCAN_RPC_URL'),
+      this.configService.get('FRAXTAL_RPC_URL'),
     );
     this.tokenContract = new ethers.Contract(
-      this.TOKEN_ADDRESS,
+      this.configService.get('TOKEN_ADDRESS'),
       ERC20_ABI,
       this.provider,
     );
@@ -54,7 +53,7 @@ export class SyncService {
     uniqueAddresses: string[],
   ): Promise<Map<string, string>> {
     const balances = new Map<string, string>();
-    const BATCH_SIZE = 100000;
+    const BATCH_SIZE = 10_000;
     const CONCURRENT_BATCHES = 10;
 
     // Split addresses into batches
@@ -88,7 +87,7 @@ export class SyncService {
 
       await Promise.all(promises);
       // Small delay to avoid overwhelming the RPC
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
     return balances;
@@ -114,12 +113,12 @@ export class SyncService {
       // Get all Transfer events
       const filter = this.tokenContract.filters.Transfer();
       const currentBlock = await this.provider.getBlockNumber();
-      const CHUNK_SIZE = 1000000;
+      const CHUNK_SIZE = 1_000_000;
       let fromBlock = startBlock;
       const uniqueAddresses = new Set<string>();
 
       while (fromBlock < currentBlock) {
-        const toBlock = Math.min(fromBlock + CHUNK_SIZE, currentBlock);
+        const toBlock = Math.min(fromBlock + CHUNK_SIZE - 1, currentBlock);
 
         try {
           const events = await this.tokenContract.queryFilter(
@@ -151,6 +150,14 @@ export class SyncService {
 
       // Process addresses in batches to get balances
       const balances = await this.processAddresses([...uniqueAddresses]);
+      if (balances.size === 0) {
+        const duration = (Date.now() - startTime) / 1000;
+        this.logger.log(
+          `✅ Sync completed in ${duration}s. Processed 0 holders`,
+        );
+
+        return;
+      }
 
       // Convert balances to holders
       const holders = Array.from(balances.entries()).map(
@@ -162,14 +169,12 @@ export class SyncService {
 
       // Update database
       await this.holdersRepository.manager.transaction(async (manager) => {
-        if (holders.length > 0) {
-          await manager
-            .createQueryBuilder()
-            .insert()
-            .into(Holder)
-            .values(holders)
-            .execute();
-        }
+        await manager
+          .createQueryBuilder()
+          .insert()
+          .into(Holder)
+          .values(holders)
+          .execute();
         await manager.save(BlockState, {
           id: 'latest',
           lastProcessedBlock: currentBlock.toString(),
@@ -234,7 +239,7 @@ export class SyncService {
       );
 
       const balances = new Map<string, string>();
-      const BATCH_SIZE = 100000;
+      const BATCH_SIZE = 100_000;
 
       // Process addresses in batches
       for (let i = 0; i < allAddresses.length; i += BATCH_SIZE) {
@@ -247,24 +252,23 @@ export class SyncService {
         });
       }
 
-      if (allAddresses.length !== balances.size) {
+      if (balances.size !== 0 && allAddresses.length !== balances.size) {
         const holders = Array.from(balances.entries()).map(
           ([address, balance]) => ({
             address,
             balance,
           }),
         );
+
         // Update database with new holders in a transaction
         await this.holdersRepository.manager.transaction(async (manager) => {
           await manager.clear(Holder); // Clear existing holders
-          if (holders.length > 0) {
-            await manager
-              .createQueryBuilder()
-              .insert()
-              .into(Holder)
-              .values(holders)
-              .execute();
-          }
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(Holder)
+            .values(holders)
+            .execute();
         });
 
         const duration = (Date.now() - startTime) / 1000;
